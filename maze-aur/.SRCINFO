@@ -1,0 +1,24 @@
+pkgbase = maze-git
+	pkgdesc = Public WiFi security monitor — MITM detection, MAC randomization, nftables firewall
+	pkgver = r1.0000000
+	pkgrel = 1
+	url = https://github.com/USERNAME/maze
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = git
+	depends = python>=3.11
+	depends = python-dbus
+	depends = nftables
+	depends = iproute2
+	depends = dbus
+	depends = libdbus
+	optdepends = wireless_tools: WiFi interface monitoring (iwgetid)
+	optdepends = imagemagick: resize app icon to multiple sizes during install
+	provides = maze
+	conflicts = maze
+	install = maze.install
+	source = maze::git+https://github.com/USERNAME/maze.git
+	sha256sums = SKIP
+
+pkgname = maze-git
