@@ -3,6 +3,8 @@ from collections import defaultdict
 from maze.core.events import Event, EventBus, EventType, ThreatLevel
 from maze.utils.logger import log
 
+_RESET_INTERVAL = 300  # seconds; counts older than this window are reset
+
 
 class PortScanDetector:
     def __init__(self, interface: str, threshold: int = 10,
@@ -11,9 +13,11 @@ class PortScanDetector:
         self.threshold = threshold
         self._whitelist = set(whitelist or [])
         self._syn_count: dict[str, int] = defaultdict(int)
+        self._alerted: set[str] = set()   # IPs that already fired SUSPICIOUS
         self._blocked: set[str] = set()
         self._bus: EventBus | None = None
         self._task: asyncio.Task | None = None
+        self._reset_task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._helper = None
 
@@ -29,6 +33,7 @@ class PortScanDetector:
         self._bus = bus
         self._loop = asyncio.get_event_loop()
         self._helper = helper
+        self._reset_task = asyncio.create_task(self._periodic_reset())
         if helper and helper.is_connected():
             helper.on_event(self._on_helper_event)
         else:
@@ -36,8 +41,17 @@ class PortScanDetector:
             log.warning("PortScanDetector: helper unavailable, trying direct sniff")
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
+        for t in (self._task, self._reset_task):
+            if t:
+                t.cancel()
+
+    async def _periodic_reset(self) -> None:
+        """Reset SYN counts every window period to avoid false positives from
+        legitimate hosts that make many connections over time."""
+        while True:
+            await asyncio.sleep(_RESET_INTERVAL)
+            self._syn_count.clear()
+            self._alerted.clear()
 
     async def _on_helper_event(self, msg: dict) -> None:
         if msg.get("event") == "syn":
@@ -69,7 +83,8 @@ class PortScanDetector:
         self._syn_count[src] += 1
         count = self._syn_count[src]
 
-        if count == self.threshold:
+        if count == self.threshold and src not in self._alerted:
+            self._alerted.add(src)
             await self._bus.emit(Event(
                 type=EventType.PORT_SCAN,
                 level=ThreatLevel.SUSPICIOUS,

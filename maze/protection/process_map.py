@@ -5,6 +5,8 @@ import struct
 from dataclasses import dataclass
 from maze.core.events import Event, EventBus, EventType, ThreatLevel
 
+_SEEN_MAX = 2000   # prune seen-set when it exceeds this size
+
 
 @dataclass
 class Connection:
@@ -21,28 +23,66 @@ def _hex_to_ip(hex_str: str) -> str:
     return socket.inet_ntoa(struct.pack("<I", addr))
 
 
+def _hex_to_ip6(hex_str: str) -> str:
+    """Convert 32-char /proc/net/tcp6 hex to standard IPv6 notation.
+
+    Each 32-bit word is stored little-endian; we unpack LE then repack BE
+    to get the correct network-byte-order IPv6 address.
+    """
+    raw = bytes.fromhex(hex_str)
+    words = struct.unpack("<4I", raw)
+    big = struct.pack(">4I", *words)
+    return socket.inet_ntop(socket.AF_INET6, big)
+
+
+def _unwrap_mapped(ip: str) -> str:
+    """Convert IPv4-mapped IPv6 (::ffff:x.x.x.x) to plain IPv4.
+
+    This ensures whitelist and port-based checks work regardless of whether
+    the kernel used an IPv4 or IPv6 socket for the same connection.
+    """
+    if ip.startswith("::ffff:") or ip.startswith("::FFFF:"):
+        candidate = ip[7:]
+        try:
+            socket.inet_aton(candidate)
+            return candidate
+        except OSError:
+            pass
+    return ip
+
+
 def _read_proc_net_tcp() -> list[dict]:
     entries = []
-    try:
-        with open("/proc/net/tcp") as f:
-            lines = f.readlines()[1:]
+    for proc_file, is_v6 in (("/proc/net/tcp", False), ("/proc/net/tcp6", True)):
+        try:
+            with open(proc_file) as f:
+                lines = f.readlines()[1:]
+        except FileNotFoundError:
+            continue
         for line in lines:
             parts = line.split()
             if len(parts) < 10:
                 continue
-            local = parts[1]
+            local  = parts[1]
             remote = parts[2]
-            inode = parts[9]
-            local_ip, local_port = local.split(":")
-            remote_ip, remote_port = remote.split(":")
-            entries.append({
-                "local": f"{_hex_to_ip(local_ip)}:{int(local_port, 16)}",
-                "remote_ip": _hex_to_ip(remote_ip),
-                "remote_port": int(remote_port, 16),
-                "inode": inode,
-            })
-    except Exception:
-        pass
+            inode  = parts[9]
+            try:
+                local_ip_hex,  local_port_hex  = local.rsplit(":", 1)
+                remote_ip_hex, remote_port_hex = remote.rsplit(":", 1)
+                if is_v6:
+                    local_ip  = _hex_to_ip6(local_ip_hex)
+                    remote_ip = _hex_to_ip6(remote_ip_hex)
+                else:
+                    local_ip  = _hex_to_ip(local_ip_hex)
+                    remote_ip = _hex_to_ip(remote_ip_hex)
+                entries.append({
+                    "local":       f"{local_ip}:{int(local_port_hex, 16)}",
+                    "remote_ip":   remote_ip,
+                    "remote_port": int(remote_port_hex, 16),
+                    "inode":       inode,
+                })
+            except Exception:
+                continue
     return entries
 
 
@@ -85,7 +125,9 @@ class ProcessNetworkMonitor:
     def _build_snapshot(self) -> list[Connection]:
         conns = []
         for entry in _read_proc_net_tcp():
-            if entry["remote_ip"] == "0.0.0.0":
+            rip = _unwrap_mapped(entry["remote_ip"])
+            # Skip unrouted / listen sockets
+            if rip in ("0.0.0.0", "::", "::ffff:0.0.0.0"):
                 continue
             result = _inode_to_pid(entry["inode"])
             if result:
@@ -94,8 +136,8 @@ class ProcessNetworkMonitor:
                     pid=pid,
                     process=name,
                     local_addr=entry["local"],
-                    remote_addr=f"{entry['remote_ip']}:{entry['remote_port']}",
-                    remote_ip=entry["remote_ip"],
+                    remote_addr=f"{rip}:{entry['remote_port']}",
+                    remote_ip=rip,
                     remote_port=entry["remote_port"],
                 ))
         return conns
@@ -125,3 +167,6 @@ class ProcessNetworkMonitor:
                         data={"process": conn.process, "pid": conn.pid,
                               "remote": conn.remote_addr},
                     ))
+            # Prune seen set to prevent unbounded memory growth over long sessions
+            if len(seen) > _SEEN_MAX:
+                seen.clear()

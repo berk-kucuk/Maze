@@ -47,6 +47,14 @@ class MACChanger:
             self._task.cancel()
 
     async def randomize(self) -> str:
+        # Don't rotate while a VPN tunnel is active — changing MAC triggers
+        # DHCP renewal which drops the tunnel and can leak the real IP briefly.
+        from maze.utils.network_info import get_active_vpn_interfaces
+        vpn_ifaces = await asyncio.to_thread(get_active_vpn_interfaces)
+        if vpn_ifaces:
+            log.info(f"MACChanger: VPN active ({vpn_ifaces}), skipping MAC rotation")
+            return ""
+
         mac = _random_mac()
         if self._helper and self._helper.is_connected():
             ok = await self._helper.set_mac(self.interface, mac)

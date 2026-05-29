@@ -25,6 +25,7 @@ class EventType(Enum):
     MODULE_TOGGLED = "module_toggled"
     ENGINE_READY   = "engine_ready"
     RECON_RESULT   = "recon_result"
+    IP_BLOCKED     = "ip_blocked"
 
 
 @dataclass

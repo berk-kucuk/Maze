@@ -220,14 +220,19 @@ class MazeEngine:
     # ── Recon ──────────────────────────────────────────────────────────────
 
     async def _on_event_for_recon(self, event) -> None:
-        from maze.core.events import ThreatLevel
-        if event.level == ThreatLevel.DANGEROUS:
-            ip = event.data.get("src") or event.data.get("ip")
-            if ip and ip not in self._recon_done:
-                self._recon_done.add(ip)
-                asyncio.create_task(self._do_recon(ip))
+        from maze.core.events import ThreatLevel, EventType
+        if event.level != ThreatLevel.DANGEROUS:
+            return
+        ip = event.data.get("src") or event.data.get("ip")
+        if not ip or ip in self._recon_done:
+            return
+        self._recon_done.add(ip)
+        # Auto-block only for confirmed active attackers (port scan).
+        # ARP/gateway IPs are skipped — blocking the default gateway cuts connectivity.
+        auto_block = event.type == EventType.PORT_SCAN
+        asyncio.create_task(self._do_recon(ip, auto_block=auto_block))
 
-    async def _do_recon(self, ip: str) -> None:
+    async def _do_recon(self, ip: str, auto_block: bool = False) -> None:
         from maze.utils.recon import recon_ip, format_recon
         from maze.core.events import Event, EventType, ThreatLevel
         try:
@@ -236,9 +241,29 @@ class MazeEngine:
                 type=EventType.RECON_RESULT,
                 level=ThreatLevel.SUSPICIOUS,
                 message=format_recon(result),
-                data={"ip": ip, "hostname": result.hostname,
-                      "open_ports": result.open_ports, "os_hint": result.os_hint},
+                data={
+                    "ip": ip,
+                    "hostname": result.hostname,
+                    "mac": result.mac,
+                    "vendor": result.vendor,
+                    "open_ports": result.open_ports,
+                    "banners": result.banners,
+                    "os_hint": result.os_hint,
+                },
             ))
+            if auto_block:
+                blocked = await self.block_ip(ip)
+                if blocked:
+                    await self.bus.emit(Event(
+                        type=EventType.IP_BLOCKED,
+                        level=ThreatLevel.DANGEROUS,
+                        message=f"Auto-blocked {ip} after recon"
+                                + (f" | os={result.os_hint}" if result.os_hint else "")
+                                + (f" | open_ports={[p for p,_ in result.open_ports[:4]]}"
+                                   if result.open_ports else ""),
+                        data={"ip": ip, "mac": result.mac, "vendor": result.vendor,
+                              "open_ports": result.open_ports, "os_hint": result.os_hint},
+                    ))
         except Exception:
             pass
 

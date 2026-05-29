@@ -42,15 +42,23 @@ class MazeConfig:
     known_processes: list = field(default_factory=lambda: [
         # Browsers
         "firefox", "chromium", "brave", "brave-browser", "chrome",
+        "chromium-browser", "opera", "vivaldi",
         # VPN clients
         "protonvpn-app", "protonvpn", "proton-vpn-gnom", "openvpn",
-        "wg", "wg-quick", "nordvpn",
+        "wg", "wg-quick", "nordvpn", "mullvad", "expressvpn",
+        "openconnect", "vpnc",
+        # Music / media streaming
+        "spotify", "Spotify", "spotifyd",
+        # Communication
+        "discord", "slack", "telegram-desktop", "signal-desktop",
+        "zoom", "teams", "skype",
         # System / dev tools
         "curl", "wget", "ssh", "git", "python3", "python", "node",
         "npm", "cargo", "rustup", "code", "claude",
+        "systemd", "systemd-resolved", "NetworkManager",
         # Package managers / update services
         "pacman", "apt", "dnf", "snap", "flatpak",
-        "packagekitd", "fwupd",
+        "packagekitd", "fwupd", "pamac",
     ])
     trusted_networks: list = field(default_factory=list)
     custom_profiles: list = field(default_factory=list)
