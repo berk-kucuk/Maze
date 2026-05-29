@@ -9,7 +9,7 @@
 ---
 
 ![Dashboard](screenshots/dashboard.png)
-
+![Events](screenshots/events.png)
 ---
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square&logo=python)](https://python.org)
@@ -315,7 +315,7 @@ maze/
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GPL3 — see [LICENSE](LICENSE).
 
 ---
 
