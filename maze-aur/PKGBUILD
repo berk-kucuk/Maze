@@ -1,61 +1,45 @@
-# Maintainer: berkkucukk <dev.berkkucukk@gmail.com>
-# AUR: https://aur.archlinux.org/packages/maze-git
+# Maintainer: berk-kucuk <dev.berkkucukk@gmail.com>
 
-pkgname=maze-git
-pkgver=r1.0000000
+pkgname=maze
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Public WiFi security monitor — MITM detection, MAC randomization, nftables firewall"
 arch=('x86_64' 'aarch64')
-url="https://github.com/USERNAME/maze"
+url="https://github.com/berk-kucuk/Maze"
 license=('MIT')
 
 # Python packages are installed into an isolated venv at /opt/maze/venv
 # (NOT into the system Python) — see maze.install for post_install details.
 depends=(
     'python>=3.11'     # interpreter only; libs go in venv
-    'python-dbus'      # dbus-python needs system headers; linked into venv
+    'python-dbus'      # linked into venv (avoids dbus-python compile)
     'nftables'         # firewall backend
     'iproute2'         # ip route / ip neigh commands
     'dbus'             # dbus daemon (runtime)
     'libdbus'          # shared library for dbus-python
 )
-makedepends=('git')
+makedepends=()
 optdepends=(
     'wireless_tools: WiFi interface monitoring (iwgetid)'
     'imagemagick: resize app icon to multiple sizes during install'
 )
-provides=('maze')
-conflicts=('maze')
 install=maze.install
 
-# ── Replace USERNAME with your GitHub/GitLab username before submitting ──
-source=("maze::git+https://github.com/USERNAME/maze.git")
-sha256sums=('SKIP')
-
-pkgver() {
-    cd "$srcdir/maze"
-    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
-}
-
-build() {
-    # Pure Python — nothing to compile at build time.
-    # Python package installation happens in post_install() inside maze.install
-    # because venv paths must match the live filesystem, not the fakeroot $pkgdir.
-    :
-}
+source=("$pkgname-$pkgver.tar.gz::https://github.com/berk-kucuk/Maze/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('f1963bb1f1b81bd20b784839285e738659598712071da13ec304b83b409c1143')
 
 package() {
-    cd "$srcdir/maze"
+    cd "$srcdir/Maze-${pkgver}"
 
     # ── Application source → /opt/maze ────────────────────────────────────
     install -dm755 "$pkgdir/opt/maze"
     cp -r maze main.py "$pkgdir/opt/maze/"
-    [[ -f pyproject.toml  ]] && install -m644 pyproject.toml  "$pkgdir/opt/maze/"
+    [[ -f pyproject.toml   ]] && install -m644 pyproject.toml   "$pkgdir/opt/maze/"
     [[ -f requirements.txt ]] && install -m644 requirements.txt "$pkgdir/opt/maze/"
     [[ -d assets ]] && cp -r assets "$pkgdir/opt/maze/"
     [[ -f MAZE.png ]] && install -m644 MAZE.png "$pkgdir/opt/maze/"
 
-    # Placeholder venv dir — created for real in post_install
+    # Placeholder venv dir — populated in post_install
     install -dm755 "$pkgdir/opt/maze/venv"
 
     # ── Launcher → /usr/bin/maze ───────────────────────────────────────────
@@ -100,6 +84,10 @@ DESKTOP
             fi
         done
     fi
+
+    # ── License ────────────────────────────────────────────────────────────
+    install -dm755 "$pkgdir/usr/share/licenses/$pkgname"
+    [[ -f LICENSE ]] && install -m644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/"
 
     # ── Sudoers example ────────────────────────────────────────────────────
     install -dm755 "$pkgdir/usr/share/doc/$pkgname"
