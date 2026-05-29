@@ -110,18 +110,10 @@ class PrivilegeDialog(QDialog):
         root.setContentsMargins(32, 28, 32, 28)
         root.setSpacing(14)
 
-        # Header row
-        from maze.gui.icons import create_app_icon
-        hdr = QHBoxLayout()
-        icon = QLabel()
-        icon.setPixmap(create_app_icon(32).pixmap(32, 32))
-        icon.setFixedSize(32, 32)
-        hdr.addWidget(icon)
-        title = QLabel("MAZE")
+        # Header
+        title = QLabel("Maze")
         title.setFont(QFont("sans-serif", 15, QFont.Weight.Bold))
-        hdr.addWidget(title)
-        hdr.addStretch()
-        root.addLayout(hdr)
+        root.addWidget(title)
 
         # Description
         desc = QLabel(

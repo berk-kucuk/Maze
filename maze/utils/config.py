@@ -42,23 +42,46 @@ class MazeConfig:
     known_processes: list = field(default_factory=lambda: [
         # Browsers
         "firefox", "chromium", "brave", "brave-browser", "chrome",
-        "chromium-browser", "opera", "vivaldi",
+        "chromium-browser", "opera", "vivaldi", "librewolf", "floorp",
         # VPN clients
         "protonvpn-app", "protonvpn", "proton-vpn-gnom", "openvpn",
         "wg", "wg-quick", "nordvpn", "mullvad", "expressvpn",
-        "openconnect", "vpnc",
+        "openconnect", "vpnc", "wireguard",
         # Music / media streaming
         "spotify", "Spotify", "spotifyd",
+        "rhythmbox", "clementine", "strawberry", "lollypop",
+        # Video / media
+        "vlc", "mpv", "celluloid", "totem",
         # Communication
         "discord", "slack", "telegram-desktop", "signal-desktop",
-        "zoom", "teams", "skype",
-        # System / dev tools
+        "zoom", "teams", "skype", "element-desktop", "fractal",
+        "thunderbird", "evolution", "geary",
+        # KDE / GNOME services
+        "kdeconnectd", "kded5", "kded6", "plasmashell",
+        "gvfsd", "gvfsd-http", "gvfsd-ftp",
+        "gnome-online-accounts", "goa-daemon",
+        "evolution-source-registry", "evolution-calendar-factory",
+        # Password managers / security
+        "keepassxc", "bitwarden", "1password",
+        # Gaming
+        "steam", "lutris", "heroic", "bottles",
+        # Cloud / sync
+        "dropbox", "nextcloud", "insync",
+        # System services that make network calls
+        "systemd", "systemd-resolved", "systemd-timesyncd",
+        "NetworkManager", "avahi-daemon", "cups", "cupsd",
+        "colord", "packagekitd", "fwupd", "snapd",
+        "ssh-agent", "gpg-agent", "dbus-daemon",
+        "pipewire", "wireplumber", "pulseaudio",
+        "bluetoothd", "obexd",
+        # Dev tools
         "curl", "wget", "ssh", "git", "python3", "python", "node",
         "npm", "cargo", "rustup", "code", "claude",
-        "systemd", "systemd-resolved", "NetworkManager",
-        # Package managers / update services
-        "pacman", "apt", "dnf", "snap", "flatpak",
-        "packagekitd", "fwupd", "pamac",
+        "docker", "containerd", "dockerd",
+        "java", "ruby",
+        # Package managers
+        "pacman", "apt", "apt-get", "dnf", "snap", "flatpak",
+        "fwupd", "pamac", "yay", "paru",
     ])
     trusted_networks: list = field(default_factory=list)
     custom_profiles: list = field(default_factory=list)
