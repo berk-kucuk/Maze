@@ -6,6 +6,7 @@ import json
 import os
 import re
 import signal
+import time
 import socket as _socket
 import struct
 import subprocess
@@ -50,17 +51,43 @@ def _push(event: dict) -> None:
             pass
 
 
+def _get_iface_ips(iface: str) -> set[str]:
+    """Return all IPv4 addresses assigned to iface (to filter own SYN packets)."""
+    import re as _re
+    own: set[str] = set()
+    try:
+        out = subprocess.check_output(
+            ["ip", "addr", "show", iface], text=True, timeout=3)
+        for m in _re.finditer(r'inet (\d+\.\d+\.\d+\.\d+)/', out):
+            own.add(m.group(1))
+    except Exception:
+        pass
+    return own
+
+
 def _sniff_thread(iface: str) -> None:
     try:
         from scapy.all import ARP, IP, TCP, sniff
 
+        own_ips: set[str] = _get_iface_ips(iface)
+        own_ips_refreshed_at: float = time.monotonic()
+
         def handle(pkt):
+            nonlocal own_ips, own_ips_refreshed_at
+            # Refresh every 60 s — replace (not update) so old-network IPs evict.
+            now = time.monotonic()
+            if now - own_ips_refreshed_at >= 60:
+                own_ips = _get_iface_ips(iface)
+                own_ips_refreshed_at = now
+
             if pkt.haslayer(ARP) and pkt[ARP].op == 2:
                 _push({"event": "arp", "src": pkt[ARP].psrc,
                        "mac": pkt[ARP].hwsrc, "dst": pkt[ARP].pdst})
             elif pkt.haslayer(TCP) and pkt.haslayer(IP) and pkt[TCP].flags == "S":
-                _push({"event": "syn", "src": pkt[IP].src,
-                       "dst": pkt[IP].dst, "dport": pkt[TCP].dport})
+                src = pkt[IP].src
+                if src not in own_ips:  # skip own outgoing SYN packets
+                    _push({"event": "syn", "src": src,
+                           "dst": pkt[IP].dst, "dport": pkt[TCP].dport})
 
         sniff(iface=iface,
               filter="arp or (tcp[tcpflags] & tcp-syn != 0 and tcp[tcpflags] & tcp-ack = 0)",

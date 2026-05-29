@@ -111,7 +111,7 @@ class MazeEngine:
         # Profiles only control detection — never auto-apply system changes.
         # Firewall rules and MAC randomization are user-triggered from the
         # Protection tab; they must never activate silently.
-        to_start = ["arp_watch", "rogue_ap", "dns_validate", "tls", "ssl_strip"]
+        to_start = ["arp_watch", "rogue_ap", "dns_validate", "tls", "ssl_strip", "dns_leak"]
 
         if pcfg.port_scan_detect:
             to_start.append("port_scan")
@@ -243,12 +243,13 @@ class MazeEngine:
                 message=format_recon(result),
                 data={
                     "ip": ip,
-                    "hostname": result.hostname,
+                    "hostname": result.netbios_name or result.hostname,
                     "mac": result.mac,
                     "vendor": result.vendor,
                     "open_ports": result.open_ports,
                     "banners": result.banners,
                     "os_hint": result.os_hint,
+                    "netbios_name": result.netbios_name,
                 },
             ))
             if auto_block:
@@ -311,7 +312,7 @@ class MazeEngine:
             return_exceptions=True,
         )
 
-        to_start = ["arp_watch", "rogue_ap", "dns_validate", "tls", "ssl_strip"]
+        to_start = ["arp_watch", "rogue_ap", "dns_validate", "tls", "ssl_strip", "dns_leak"]
         if getattr(profile_cfg, "port_scan_detect", True):
             to_start.append("port_scan")
         if getattr(profile_cfg, "process_monitor", True):

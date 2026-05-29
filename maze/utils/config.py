@@ -36,7 +36,7 @@ class CustomProfileConfig:
 class MazeConfig:
     interface: str = field(default=None)
     mac_rotation_minutes: int = 30
-    port_scan_threshold: int = 10
+    port_scan_threshold: int = 25
     theme: str = "dark"
     language: str = "en"
     known_processes: list = field(default_factory=lambda: [
@@ -112,6 +112,12 @@ def load_config() -> MazeConfig:
                 CustomProfileConfig.from_dict(p) if isinstance(p, dict) else p
                 for p in cfg.custom_profiles
             ]
+            # Merge new default known_processes so existing users pick them up.
+            defaults = MazeConfig.__dataclass_fields__["known_processes"].default_factory()
+            cfg.known_processes = list(dict.fromkeys(cfg.known_processes + defaults))
+            # Adopt new default threshold if saved value is still the old default (10).
+            if cfg.port_scan_threshold == 10:
+                cfg.port_scan_threshold = 25
             return cfg
         except Exception:
             pass

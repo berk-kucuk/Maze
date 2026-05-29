@@ -1,9 +1,11 @@
 import asyncio
+import threading
 from collections import defaultdict
 from maze.core.events import Event, EventBus, EventType, ThreatLevel
 from maze.utils.logger import log
 
-_RESET_INTERVAL = 300  # seconds; counts older than this window are reset
+_RESET_INTERVAL    = 300   # SYN count sliding window (seconds)
+_OWN_IP_REFRESH    = 60    # how often to re-read own interface IPs (seconds)
 
 
 class PortScanDetector:
@@ -11,13 +13,16 @@ class PortScanDetector:
                  whitelist: list[str] | None = None):
         self.interface = interface
         self.threshold = threshold
-        self._whitelist = set(whitelist or [])
+        self._whitelist  = set(whitelist or [])  # user-configured, permanent
+        self._own_ips: set[str] = set()          # dynamic, refreshed every 60 s
         self._syn_count: dict[str, int] = defaultdict(int)
-        self._alerted: set[str] = set()   # IPs that already fired SUSPICIOUS
+        self._alerted: set[str] = set()
         self._blocked: set[str] = set()
         self._bus: EventBus | None = None
         self._task: asyncio.Task | None = None
         self._reset_task: asyncio.Task | None = None
+        self._own_ip_task: asyncio.Task | None = None
+        self._stop_event = threading.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._helper = None
 
@@ -30,10 +35,14 @@ class PortScanDetector:
         return dict(self._syn_count)
 
     async def start(self, bus: EventBus, helper=None) -> None:
-        self._bus = bus
+        self._bus  = bus
         self._loop = asyncio.get_event_loop()
         self._helper = helper
-        self._reset_task = asyncio.create_task(self._periodic_reset())
+        self._stop_event.clear()
+        # Initial fetch; then keep refreshing so network changes are picked up.
+        await self._refresh_own_ips()
+        self._own_ip_task  = asyncio.create_task(self._own_ip_refresh_loop())
+        self._reset_task   = asyncio.create_task(self._periodic_reset())
         if helper and helper.is_connected():
             helper.on_event(self._on_helper_event)
         else:
@@ -41,17 +50,37 @@ class PortScanDetector:
             log.warning("PortScanDetector: helper unavailable, trying direct sniff")
 
     async def stop(self) -> None:
-        for t in (self._task, self._reset_task):
+        self._stop_event.set()
+        for t in (self._task, self._reset_task, self._own_ip_task):
             if t:
                 t.cancel()
 
+    # ── own-IP refresh ────────────────────────────────────────────────────────
+
+    async def _refresh_own_ips(self) -> None:
+        from maze.detection.arp_watch import _get_own_ips
+        self._own_ips = await asyncio.to_thread(_get_own_ips, self.interface)
+
+    async def _own_ip_refresh_loop(self) -> None:
+        """Re-read interface IPs every 60 s.
+
+        Replaces (not appends) the set on each refresh, so:
+        - A new DHCP lease evicts the old IP immediately.
+        - IPs from previous networks never accumulate.
+        """
+        while True:
+            await asyncio.sleep(_OWN_IP_REFRESH)
+            await self._refresh_own_ips()
+
+    # ── sliding-window reset ──────────────────────────────────────────────────
+
     async def _periodic_reset(self) -> None:
-        """Reset SYN counts every window period to avoid false positives from
-        legitimate hosts that make many connections over time."""
         while True:
             await asyncio.sleep(_RESET_INTERVAL)
             self._syn_count.clear()
             self._alerted.clear()
+
+    # ── packet ingestion ─────────────────────────────────────────────────────
 
     async def _on_helper_event(self, msg: dict) -> None:
         if msg.get("event") == "syn":
@@ -70,6 +99,7 @@ class PortScanDetector:
                         self._loop,
                     ),
                     store=False,
+                    stop_filter=lambda _: self._stop_event.is_set(),
                 ),
             )
         except Exception as e:
@@ -78,7 +108,10 @@ class PortScanDetector:
     async def _process(self, src: str | None) -> None:
         if not src:
             return
-        if src in self._whitelist:
+        # Skip user whitelist and current own interface IPs.
+        # _own_ips is a fresh set (replaced, not appended) so old network
+        # IPs do not persist after a DHCP lease change or network switch.
+        if src in self._whitelist or src in self._own_ips:
             return
         self._syn_count[src] += 1
         count = self._syn_count[src]

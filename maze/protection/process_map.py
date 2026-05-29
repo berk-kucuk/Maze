@@ -86,21 +86,31 @@ def _read_proc_net_tcp() -> list[dict]:
     return entries
 
 
-def _inode_to_pid(inode: str) -> tuple[int, str] | None:
+def _build_inode_map() -> dict[str, tuple[int, str]]:
+    """Scan /proc once to build inode → (pid, name) for all socket fds.
+
+    O(processes × fds) total instead of O(connections × processes × fds)
+    when looking up multiple inodes from the same snapshot.
+    """
+    inode_map: dict[str, tuple[int, str]] = {}
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
-            fd_dir = f"/proc/{pid}/fd"
+            comm_path = f"/proc/{pid}/comm"
+            fd_dir    = f"/proc/{pid}/fd"
+            with open(comm_path) as f:
+                name = f.read().strip()
             for fd in os.listdir(fd_dir):
-                link = os.readlink(f"{fd_dir}/{fd}")
-                if f"socket:[{inode}]" in link:
-                    with open(f"/proc/{pid}/comm") as f:
-                        name = f.read().strip()
-                    return int(pid), name
+                try:
+                    link = os.readlink(f"{fd_dir}/{fd}")
+                    if link.startswith("socket:["):
+                        inode_map[link[8:-1]] = (int(pid), name)
+                except (PermissionError, FileNotFoundError):
+                    pass
         except (PermissionError, FileNotFoundError):
             continue
-    return None
+    return inode_map
 
 
 class ProcessNetworkMonitor:
@@ -123,13 +133,13 @@ class ProcessNetworkMonitor:
         return await asyncio.to_thread(self._build_snapshot)
 
     def _build_snapshot(self) -> list[Connection]:
+        inode_map = _build_inode_map()  # single /proc scan for all pids
         conns = []
         for entry in _read_proc_net_tcp():
             rip = _unwrap_mapped(entry["remote_ip"])
-            # Skip unrouted / listen sockets
             if rip in ("0.0.0.0", "::", "::ffff:0.0.0.0"):
                 continue
-            result = _inode_to_pid(entry["inode"])
+            result = inode_map.get(entry["inode"])
             if result:
                 pid, name = result
                 conns.append(Connection(

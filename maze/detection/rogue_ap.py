@@ -61,7 +61,15 @@ class RogueAPDetector:
                     ))
 
     async def _check_icmp_redirects(self) -> None:
-        """Alert if ICMP redirect acceptance is enabled — allows traffic rerouting."""
+        """Alert if ICMP redirect acceptance is enabled on a wireless interface.
+
+        ICMP redirect attacks require a rogue device on the same L2 segment and
+        are only practically exploitable on shared wireless networks. On wired
+        home connections the router itself may legitimately send redirects, so
+        warning there produces constant false positives with no security value.
+        """
+        if not self._is_wifi:
+            return
         try:
             path = f"/proc/sys/net/ipv4/conf/{self.interface}/accept_redirects"
             val = await asyncio.to_thread(lambda: open(path).read().strip())

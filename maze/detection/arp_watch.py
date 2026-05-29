@@ -47,7 +47,8 @@ def _get_own_ips(interface: str) -> set[str]:
 class ARPWatcher:
     def __init__(self, interface: str, whitelist: list[str] | None = None):
         self.interface = interface
-        self._whitelist = set(whitelist or [])
+        self._whitelist = set(whitelist or [])  # user-configured, permanent
+        self._own_ips: set[str] = set()         # dynamic, refreshed every 60 s
         self.devices: dict[str, dict] = {}
         self._arp_table: dict[str, str] = {}
         self._lock = threading.Lock()          # protects devices + _arp_table
@@ -64,11 +65,7 @@ class ARPWatcher:
         self._loop = asyncio.get_event_loop()
         self._stop_event.clear()
 
-        # Whitelist own IPs so gratuitous ARPs after MAC rotation
-        # don't trigger false ARP-spoof alerts on the local machine.
-        own_ips = await asyncio.to_thread(_get_own_ips, self.interface)
-        self._whitelist.update(own_ips)
-
+        self._own_ips = await asyncio.to_thread(_get_own_ips, self.interface)
         self._gw_ip, self._gw_mac = await asyncio.to_thread(
             _get_gateway_info, self.interface)
 
@@ -90,8 +87,34 @@ class ARPWatcher:
                     pass
 
     async def _on_helper_event(self, msg: dict) -> None:
-        if msg.get("event") == "arp":
-            self._process(msg["src"], msg["mac"])
+        if msg.get("event") != "arp":
+            return
+        ip, mac = msg["src"], msg["mac"]
+        if ip in self._whitelist or ip in self._own_ips:
+            return
+        # Collect the event to emit BEFORE releasing data to avoid holding
+        # threading.Lock across an await (would block the scapy thread for
+        # the full duration of the emit).
+        event_to_emit = None
+        with self._lock:
+            if ip not in self.devices:
+                self.devices[ip] = {"mac": mac, "first_seen": datetime.now()}
+                event_to_emit = Event(
+                    type=EventType.DEVICE_FOUND, level=ThreatLevel.SAFE,
+                    message=f"New device: {ip} ({mac})",
+                    data={"ip": ip, "mac": mac},
+                )
+            elif self._arp_table.get(ip) and self._arp_table[ip] != mac:
+                event_to_emit = Event(
+                    type=EventType.ARP_SPOOF, level=ThreatLevel.DANGEROUS,
+                    message=f"ARP spoofing: {ip} changed MAC from "
+                            f"{self._arp_table[ip]} to {mac} — possible MITM",
+                    data={"ip": ip, "old_mac": self._arp_table[ip], "new_mac": mac},
+                )
+                self.devices[ip]["mac"] = mac
+            self._arp_table[ip] = mac
+        if event_to_emit:
+            await self._bus.emit(event_to_emit)
 
     async def _run_direct(self) -> None:
         try:
@@ -111,7 +134,7 @@ class ARPWatcher:
         )
 
     def _process(self, ip: str, mac: str) -> None:
-        if ip in self._whitelist:
+        if ip in self._whitelist or ip in self._own_ips:
             return
         with self._lock:
             if ip not in self.devices:
@@ -134,10 +157,16 @@ class ARPWatcher:
             self._arp_table[ip] = mac
 
     async def _monitor_gateway(self) -> None:
-        """Periodically verify default gateway IP and MAC — early MITM indicator."""
+        """Periodically verify default gateway IP and MAC — early MITM indicator.
+        Also refreshes own interface IPs so DHCP changes and network switches
+        are picked up within one cycle (replaced, not appended).
+        """
         while True:
             await asyncio.sleep(20)
             try:
+                # Refresh own IPs — replace set so old-network IPs don't linger
+                self._own_ips = await asyncio.to_thread(
+                    _get_own_ips, self.interface)
                 gw_ip, gw_mac = await asyncio.to_thread(
                     _get_gateway_info, self.interface)
                 if not gw_ip:
