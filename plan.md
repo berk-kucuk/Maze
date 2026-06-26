@@ -24,7 +24,7 @@ Public ağda seni tehdit eden 3 şey var:
 
 ---
 
-## Konsept: **Maze**
+## Konsept: **Maze Network**
 
 > *"Public ağa bağlandığın anda devreye girer. Saldırıları tespit eder, cihazını izole eder, ağda iz bırakmazsın."*
 

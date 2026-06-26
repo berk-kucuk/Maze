@@ -1,5 +1,5 @@
 """
-Maze detection test suite.
+Maze Network detection test suite.
 Run as root (needs raw sockets for scapy):
     sudo python3 tests/test_detections.py
 
@@ -134,7 +134,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("=" * 60)
-    print("  Maze Detection Test Suite")
+    print("  Maze Network Detection Test Suite")
     print(f"  Target: {TARGET_IP} on {IFACE}")
     print("=" * 60)
 
@@ -150,5 +150,5 @@ if __name__ == "__main__":
     test_port_scan_dangerous()
 
     print("\n" + "=" * 60)
-    print("  Done. Check Maze GUI Events tab.")
+    print("  Done. Check Maze Network GUI Events tab.")
     print("=" * 60)

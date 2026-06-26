@@ -61,7 +61,7 @@ class Dashboard(QMainWindow):
         self.cfg = cfg
         self.state = state
 
-        self.setWindowTitle("Maze")
+        self.setWindowTitle("Maze Network")
         self.setWindowIcon(create_app_icon(64))
         self.setMinimumSize(1100, 720)
         self.resize(1280, 820)
@@ -97,7 +97,7 @@ class Dashboard(QMainWindow):
         layout.setContentsMargins(16, 0, 0, 0)
         layout.setSpacing(12)
 
-        logo = QLabel("MAZE")
+        logo = QLabel("MAZE NETWORK")
         logo.setObjectName("logo")
         layout.addWidget(logo)
 

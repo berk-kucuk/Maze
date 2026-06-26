@@ -58,8 +58,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "no_connections": "No active connections",
         "no_devices": "No devices detected",
         # Notifications
-        "notif_danger_title": "Maze — Threat Detected",
-        "notif_warn_title":   "Maze — Suspicious Activity",
+        "notif_danger_title": "Maze Network — Threat Detected",
+        "notif_warn_title":   "Maze Network — Suspicious Activity",
         # Dashboard overview
         "dash_network": "Network Interface",
         "dash_firewall": "Firewall",
@@ -150,8 +150,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "no_connections": "Aktif bağlantı yok",
         "no_devices": "Cihaz tespit edilmedi",
         # Notifications
-        "notif_danger_title": "Maze — Tehdit Tespit Edildi",
-        "notif_warn_title":   "Maze — Şüpheli Aktivite",
+        "notif_danger_title": "Maze Network — Tehdit Tespit Edildi",
+        "notif_warn_title":   "Maze Network — Şüpheli Aktivite",
         # Dashboard overview
         "dash_network": "Ağ Arayüzü",
         "dash_firewall": "Güvenlik Duvarı",

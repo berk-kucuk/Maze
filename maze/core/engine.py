@@ -85,7 +85,7 @@ class MazeEngine:
         await self.bus.emit(Event(
             type=EventType.ENGINE_READY,
             level=ThreatLevel.SAFE,
-            message="Maze engine started",
+            message="Maze Network engine started",
         ))
 
     async def stop(self) -> None:

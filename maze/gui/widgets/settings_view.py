@@ -14,8 +14,8 @@ _AUTOSTART_PATH = Path.home() / ".config" / "autostart" / "maze.desktop"
 _AUTOSTART_TEMPLATE = """\
 [Desktop Entry]
 Type=Application
-Name=Maze
-Exec={python} {script}
+Name=Maze Network
+Exec={python} {script} --background
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
@@ -242,7 +242,7 @@ class SettingsView(QWidget):
         layout = QVBoxLayout(grp)
         layout.setSpacing(10)
 
-        self._autostart_cb = QCheckBox("Launch Maze automatically on login")
+        self._autostart_cb = QCheckBox("Launch Maze Network automatically on login (hidden in tray)")
         self._autostart_cb.setChecked(_AUTOSTART_PATH.exists())
         self._autostart_cb.toggled.connect(self._toggle_autostart)
         layout.addWidget(self._autostart_cb)

@@ -1,5 +1,10 @@
 """
-Maze privileged helper — run as root via sudo.
+Maze Network privileged helper.
+
+Runs as root — normally as a systemd system service (daemon mode) so the GUI
+never has to handle a sudo password. Access to its control socket is gated by
+the `maze` group (members can connect; everyone else is rejected by both file
+permissions and an in-process peer-credential check).
 """
 import asyncio
 import json
@@ -12,8 +17,12 @@ import struct
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
-_SOCK_PATH = "/tmp/maze-{uid}.sock"
+# Fixed, well-known socket living under /run (tmpfs, cleared on reboot).
+_SOCK_DIR  = "/run/maze"
+_SOCK_PATH = "/run/maze/maze.sock"
+_GROUP     = "maze"
 _MAC_RE    = re.compile(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
 _IP_RE     = re.compile(r'^\d{1,3}(\.\d{1,3}){3}(/\d{1,2})?$')
 _IFACE_RE  = re.compile(r'^[a-zA-Z0-9_\-]{1,15}$')
@@ -38,6 +47,41 @@ def _peer_uid(writer: asyncio.StreamWriter) -> int:
         return uid
     except Exception:
         return -1
+
+
+def _maze_gid() -> int | None:
+    try:
+        import grp
+        return grp.getgrnam(_GROUP).gr_gid
+    except Exception:
+        return None
+
+
+def _peer_allowed(writer: asyncio.StreamWriter) -> bool:
+    """
+    Decide whether a connecting client may use the helper.
+
+    • Legacy sudo mode (SUDO_UID set): only the invoking user (or root).
+    • Daemon mode: any member of the `maze` group (or root). If the group does
+      not exist, fall back to allowing — the socket's file permissions already
+      gate access in that case.
+    """
+    uid = _peer_uid(writer)
+    if uid < 0:
+        return False
+    if uid == 0:
+        return True
+    if _owner_uid:                       # launched via sudo by a specific user
+        return uid == _owner_uid
+    gid = _maze_gid()
+    if gid is None:
+        return True
+    try:
+        import pwd
+        pw = pwd.getpwuid(uid)
+        return gid in os.getgrouplist(pw.pw_name, pw.pw_gid)
+    except Exception:
+        return False
 
 
 def _push(event: dict) -> None:
@@ -97,8 +141,8 @@ def _sniff_thread(iface: str) -> None:
 
 
 async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    # Verify caller is the invoking user, not an arbitrary local process
-    if _owner_uid and _peer_uid(writer) != _owner_uid:
+    # Verify the caller is allowed (maze group member / invoking user / root)
+    if not _peer_allowed(writer):
         writer.close()
         return
 
@@ -223,10 +267,50 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
         writer.close()
 
 
+def _setup_socket_perms(sock_path: str) -> None:
+    """Make the socket reachable by the right principals, nobody else."""
+    gid = _maze_gid()
+    if gid is not None:
+        # Daemon mode: root:maze, group can connect.
+        try:
+            os.chown(sock_path, 0, gid)
+            os.chmod(sock_path, 0o660)
+            return
+        except Exception:
+            pass
+    # Legacy sudo mode: hand the socket to the invoking user only.
+    uid = int(os.environ.get("SUDO_UID", "0"))
+    sgid = int(os.environ.get("SUDO_GID", "0"))
+    if uid:
+        try:
+            os.chown(sock_path, uid, sgid)
+            os.chmod(sock_path, 0o600)
+            return
+        except Exception:
+            pass
+    # No group and not launched via sudo — leave it owner-only (root).
+    os.chmod(sock_path, 0o600)
+
+
+def _ensure_sock_dir() -> None:
+    """Create /run/maze and make it traversable by the maze group."""
+    Path(_SOCK_DIR).mkdir(parents=True, exist_ok=True)
+    gid = _maze_gid()
+    try:
+        if gid is not None:
+            os.chown(_SOCK_DIR, 0, gid)
+            os.chmod(_SOCK_DIR, 0o750)
+        else:
+            os.chmod(_SOCK_DIR, 0o755)
+    except Exception:
+        pass
+
+
 async def _serve(sock_path: str, iface: str) -> None:
     global _loop
     _loop = asyncio.get_running_loop()
 
+    _ensure_sock_dir()
     try:
         os.unlink(sock_path)
     except FileNotFoundError:
@@ -239,10 +323,7 @@ async def _serve(sock_path: str, iface: str) -> None:
     finally:
         os.umask(old_umask)
 
-    uid = int(os.environ.get("SUDO_UID", "0"))
-    gid = int(os.environ.get("SUDO_GID", "0"))
-    if uid:
-        os.chown(sock_path, uid, gid)
+    _setup_socket_perms(sock_path)
 
     threading.Thread(target=_sniff_thread, args=(iface,), daemon=True).start()
     _loop.add_signal_handler(signal.SIGTERM, _loop.stop)
@@ -251,26 +332,30 @@ async def _serve(sock_path: str, iface: str) -> None:
         await server.serve_forever()
 
 
+def _resolve_iface(arg: str) -> str:
+    """Use the given interface if it is up, otherwise auto-detect."""
+    if arg:
+        operstate = Path("/sys/class/net") / arg / "operstate"
+        if operstate.exists() and operstate.read_text().strip() in ("up", "unknown"):
+            return arg
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    try:
+        from maze.utils.network_info import get_active_physical_interface
+        detected = get_active_physical_interface()
+        if detected != "—":
+            return detected
+    except Exception:
+        pass
+    return arg or "eth0"
+
+
 if __name__ == "__main__":
     if os.getuid() != 0:
-        print("maze.helper must run as root", file=sys.stderr)
+        print("maze helper must run as root", file=sys.stderr)
         sys.exit(1)
 
+    # SUDO_UID is set only in legacy sudo mode; it is absent under systemd,
+    # which is how the helper distinguishes daemon mode from sudo mode.
     _owner_uid = int(os.environ.get("SUDO_UID", "0"))
-    uid   = os.environ.get("SUDO_UID", "0")
-    iface = sys.argv[1] if len(sys.argv) > 1 else "eth0"
-    sock  = _SOCK_PATH.format(uid=uid)
-
-    from pathlib import Path as _Path
-    operstate_path = _Path("/sys/class/net") / iface / "operstate"
-    if not operstate_path.exists() or operstate_path.read_text().strip() not in ("up", "unknown"):
-        sys.path.insert(0, str(_Path(__file__).parent.parent))
-        try:
-            from maze.utils.network_info import get_active_physical_interface
-            detected = get_active_physical_interface()
-            if detected != "—":
-                iface = detected
-        except Exception:
-            pass
-
-    asyncio.run(_serve(sock, iface))
+    iface = _resolve_iface(sys.argv[1] if len(sys.argv) > 1 else "")
+    asyncio.run(_serve(_SOCK_PATH, iface))

@@ -5,7 +5,7 @@ build-backend = "setuptools.backends.legacy:build"
 [project]
 name = "maze"
 version = "0.1.0"
-description = "Public WiFi güvenlik aracı — MITM tespiti, MAC randomization, firewall otomasyonu"
+description = "Maze Network — Public WiFi güvenlik aracı: MITM tespiti, MAC randomization, firewall otomasyonu"
 requires-python = ">=3.11"
 dependencies = [
     "scapy>=2.5.0",

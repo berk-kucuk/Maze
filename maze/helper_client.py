@@ -7,13 +7,14 @@ import json
 import os
 from typing import Callable
 
-_SOCK_PATH = "/tmp/maze-{uid}.sock"
+# Fixed socket published by the daemon (see maze/helper.py).
+_SOCK_PATH = "/run/maze/maze.sock"
 
 
 class HelperClient:
     def __init__(self, uid: int = None):
         self._uid = uid if uid is not None else os.getuid()
-        self._sock = _SOCK_PATH.format(uid=self._uid)
+        self._sock = _SOCK_PATH
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._pending: dict[int, asyncio.Future] = {}

@@ -1,6 +1,6 @@
 <div align="center">
 
-# MAZE
+# MAZE NETWORK
 
 **Public WiFi Security Monitor**
 
@@ -21,11 +21,11 @@
 
 ---
 
-## What is Maze?
+## What is Maze Network?
 
-Maze is a Linux desktop application that monitors your network in real time and alerts you to threats commonly found on public WiFi networks — coffee shops, airports, hotels. It detects active attacks (ARP spoofing, port scans, Evil Twin APs, DNS poisoning), manages a safe nftables firewall, and gives you one-click tools to block IPs and ports without breaking your internet connection.
+Maze Network is a Linux desktop application that monitors your network in real time and alerts you to threats commonly found on public WiFi networks — coffee shops, airports, hotels. It detects active attacks (ARP spoofing, port scans, Evil Twin APs, DNS poisoning), manages a safe nftables firewall, and gives you one-click tools to block IPs and ports without breaking your internet connection.
 
-The GUI runs as your normal user. A small privileged helper daemon (started via `sudo` at launch) handles packet capture, firewall rules, and MAC address changes — keeping the attack surface minimal.
+The GUI runs as your normal user. A small privileged helper runs as a **systemd daemon** (root) that handles packet capture, firewall rules, and MAC address changes. Because the daemon is started by systemd, the GUI never needs your password — credential handling is removed entirely, which closes off the password-prompt privilege-escalation surface.
 
 ---
 
@@ -65,7 +65,7 @@ The GUI runs as your normal user. A small privileged helper daemon (started via 
 - **IP Reconnaissance** — Auto-triggered on dangerous events: reverse DNS, open port scan, OS fingerprint via TTL
 - **Custom Profiles** — Create named security profiles with per-feature toggles
 - **Persistent Log** — All events written to `~/.config/maze/maze.log` (rotating, 2 MB × 3)
-- **System Tray** — Minimize to tray; desktop notifications for dangerous events
+- **System Tray** — Starts hidden in the tray on login (autostart); click the tray icon to show the window; desktop notifications for dangerous events
 - **Session Summary** — Event count breakdown shown on quit
 - **English + Turkish** UI with live language switching
 
@@ -75,16 +75,16 @@ The GUI runs as your normal user. A small privileged helper daemon (started via 
 
 ```
 ┌──────────────────────────────────────────────┐
-│  GUI Process  (normal user)                  │
+│  GUI Process  (normal user, no password)     │
 │                                              │
 │  PyQt6 + qasync  ──►  MazeEngine            │
 │                           │                  │
 │                    HelperClient              │
 │                           │  Unix socket     │
 └───────────────────────────┼──────────────────┘
-                            │ SO_PEERCRED auth
+              /run/maze/maze.sock (root:maze 0660)
 ┌───────────────────────────┼──────────────────┐
-│  Helper Daemon  (root)    │                  │
+│  Helper Daemon (root, systemd: maze.service) │
 │                           ▼                  │
 │   scapy (ARP/SYN sniff)  ─────► push events │
 │   nft (firewall rules)                       │
@@ -93,7 +93,7 @@ The GUI runs as your normal user. A small privileged helper daemon (started via 
 └──────────────────────────────────────────────┘
 ```
 
-The helper authenticates callers using Linux `SO_PEERCRED` — only the UID that launched the helper can send commands. All nft operations go through an allowlist (`add`, `delete`, `list`, `flush`, `get`). Input is validated with strict regex before any subprocess call.
+The helper runs as a systemd service and publishes a Unix socket at `/run/maze/maze.sock`, owned `root:maze` with mode `0660`. Only members of the `maze` group can reach it — enforced both by file permissions and an in-process `SO_PEERCRED` group-membership check. All nft operations go through an allowlist (`add`, `delete`, `list`, `flush`, `get`). Input is validated with strict regex before any subprocess call.
 
 ---
 
@@ -118,7 +118,7 @@ paru -S maze
 yay -S maze
 ```
 
-The AUR package installs Maze to `/opt/maze` and creates an isolated Python venv at `/opt/maze/venv` — no system Python packages are modified.
+The AUR package installs Maze Network to `/opt/maze` and creates an isolated Python venv at `/opt/maze/venv` — no system Python packages are modified.
 
 ---
 
@@ -168,23 +168,21 @@ python main.py
 
 ## First Launch
 
-When Maze starts, it asks for your **sudo password** to launch the privileged helper. The password is used once to start the helper daemon — it is never stored.
+Maze Network **never asks for a password**. A system install registers the privileged helper as a systemd service (`maze.service`) that starts at boot, and the GUI simply connects to it over `/run/maze/maze.sock`.
 
-<img src="screenshots/privilege_dialog.png" width="420" alt="Privilege dialog">
+A `maze` group gates access to that socket, and your user is added to it during install. **Log out and back in once** (or run `newgrp maze`) so your desktop session picks up the new group membership — until then the GUI runs in limited (detection-only) mode.
 
-The helper runs as root in the background and communicates with the GUI over a Unix domain socket at `/tmp/maze-<uid>.sock`. The GUI window itself always runs as your normal user.
+The GUI always runs as your normal user; only the helper runs as root. If the daemon is not running for any reason, the GUI degrades gracefully to limited mode instead of prompting.
 
-### Skip the password prompt (optional)
+### Running from a source checkout
 
-If you prefer not to type your password every time, create a targeted sudoers entry:
+If you cloned the repo and want the daemon without a full `/opt` install:
 
 ```bash
-sudo cp /usr/share/doc/maze-git/maze.sudoers.example /etc/sudoers.d/maze
-sudo nano /etc/sudoers.d/maze   # replace USERNAME with your Linux username
-sudo visudo -c                  # validate
+sudo ./scripts/setup-daemon.sh        # install + enable maze.service, add you to 'maze'
+# ... and to remove it:
+sudo ./scripts/setup-daemon.sh --uninstall
 ```
-
-This grants passwordless sudo for the specific helper binary only — no other commands are affected.
 
 ---
 
@@ -215,7 +213,7 @@ In the **Events** tab, click **Export** to save the currently visible events (re
 
 ### Autostart
 
-In **Settings → System**, toggle *"Launch Maze automatically on login"*. This writes a standard `~/.config/autostart/maze.desktop` entry compatible with GNOME, KDE, XFCE, and any XDG-compliant desktop.
+The installer adds an autostart entry (`maze.desktop` with `Exec=maze --background`) so Maze Network launches **hidden in the system tray** on every login — the detection engine starts in the background without opening a window. Click the tray icon to show the dashboard; closing the window minimizes it back to the tray. System installs write `/etc/xdg/autostart/maze.desktop`; user installs write `~/.config/autostart/maze.desktop`.
 
 ---
 
@@ -261,10 +259,10 @@ Dangerous events trigger a **desktop notification** via the system tray and auto
 
 ## Security model
 
-- **No polkit, no setcap, no SUID bit.** The privileged helper is launched once with `sudo` and communicates over a Unix socket. A compromised GUI process cannot escalate beyond what the helper exposes.
+- **No password in the GUI, no polkit, no setcap, no SUID bit.** The privileged helper runs as a systemd-managed root daemon; the GUI only talks to it over a Unix socket. The GUI never handles credentials, so a malicious app cannot phish a sudo password through it, and a compromised GUI process cannot escalate beyond what the helper exposes.
 - **Helper allowlist.** Only six nft operations are permitted (`add`, `delete`, `list`, `flush`, `get`). Every input (MAC, IP, interface name, table name, sysctl key) is validated with strict regex before reaching any subprocess call.
-- **UID verification.** The helper uses `SO_PEERCRED` to verify that every connecting process belongs to the same UID that launched it — arbitrary local processes cannot send commands.
-- **`policy accept` firewall.** Maze's nftables table never drops traffic globally. It only drops explicitly blocked IPs/ports. Deleting the table restores the original state instantly.
+- **Group-gated socket + peer verification.** The socket is `root:maze` mode `0660`, so only `maze`-group members can open it, and the helper additionally re-checks each caller's group membership via `SO_PEERCRED`. Arbitrary local processes cannot send commands.
+- **`policy accept` firewall.** Maze Network's nftables table never drops traffic globally. It only drops explicitly blocked IPs/ports. Deleting the table restores the original state instantly.
 - **No auto-blocking.** Detection modules never automatically block traffic. All blocking is user-initiated (right-click, Firewall tab). The philosophy: alert and inform, never silently cut connections.
 
 ---
@@ -295,7 +293,7 @@ maze/
 │   └── service_blocker.py # Close listening services
 ├── gui/
 │   ├── dashboard.py       # Main window, tray, session summary
-│   ├── privilege.py       # Sudo dialog + helper launch
+│   ├── privilege.py       # Connect to the helper daemon (no password)
 │   └── widgets/
 │       ├── dashboard_view.py   # Cards, bandwidth monitor, scan table
 │       ├── event_list.py       # Filterable event log + CSV export
@@ -307,7 +305,7 @@ maze/
 │   ├── logger.py          # Rotating file + console logger
 │   ├── network_info.py    # Interface info, firewall status
 │   └── recon.py           # Passive IP reconnaissance
-├── helper.py              # Privileged daemon (runs as root)
+├── helper.py              # Privileged daemon (runs as root via systemd)
 └── helper_client.py       # Async client for the helper socket
 ```
 
